@@ -1,5 +1,11 @@
 indexes:
 
+- kind: Alert
+  ancestor: yes
+  properties:
+  - name: date
+    direction: desc
+
 - kind: Conference
   properties:
   - name: city
