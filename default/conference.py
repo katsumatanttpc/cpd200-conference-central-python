@@ -21,12 +21,14 @@ from models import ConflictException
 from models import Profile
 from models import ProfileMiniForm
 from models import ProfileForm
-from models import Conference
 from models import BooleanMessage
+from models import Conference
 from models import ConferenceForm
 from models import ConferenceForms
 from models import ConferenceQueryForms
 from models import TeeShirtSize
+from models import Alert
+from models import LatestAlert
 
 from utils import getUserId
 
@@ -312,7 +314,7 @@ class ConferenceApi(remote.Service):
         return self._doProfile(request)
 
 
-    # - - - Registration - - - - - - - - - - - - - - - - - - - -
+# - - - Registration - - - - - - - - - - - - - - - - - - - -
 
     @ndb.transactional(xg=True)
     def _conferenceRegistration(self, request, reg=True):
@@ -363,6 +365,30 @@ class ConferenceApi(remote.Service):
         return BooleanMessage(data=retval)
 
 
+    @endpoints.method(message_types.VoidMessage, ConferenceForms,
+            path='conferences/attending',
+            http_method='GET', name='getConferencesToAttend')
+    def getConferencesToAttend(self, request):
+        """Get list of conferences that user has registered for."""
+        prof = self._getProfileFromUser() # get user Profile
+        conf_keys = [ndb.Key(urlsafe=wsck) for wsck in prof.conferenceKeysToAttend]
+        conferences = ndb.get_multi(conf_keys)
+
+        # get organizers
+        organisers = [ndb.Key(Profile, conf.organizerUserId) for conf in conferences]
+        profiles = ndb.get_multi(organisers)
+
+        # put display names in a dict for easier fetching
+        names = {}
+        for profile in profiles:
+            names[profile.key.id()] = profile.displayName
+
+        # return set of ConferenceForm objects per Conference
+        return ConferenceForms(items=[self._copyConferenceToForm(conf, names[conf.organizerUserId])\
+         for conf in conferences]
+        )
+
+
     @endpoints.method(CONF_GET_REQUEST, BooleanMessage,
             path='conference/{websafeConferenceKey}',
             http_method='POST', name='registerForConference')
@@ -385,6 +411,27 @@ class ConferenceApi(remote.Service):
         # return ConferenceForm
         return self._copyConferenceToForm(conf, getattr(prof, 'displayName'))
 
+
+# - - - Alerts - - - - - - - - - - - - - - - - - - - - - - -
+
+    def _doAlert(self):
+        """Get latest alert and return to user"""
+        # retrieve latest alert from datastore
+        a = Alert.query().order(-Alert.date).get()
+        la = LatestAlert()
+        for field in la.all_fields():
+            # retrieve content string and discard the rest
+            if field.name == 'content':
+                setattr(la, field.name, a.content)
+        la.check_initialized()
+        return la
+
+
+    @endpoints.method(message_types.VoidMessage, LatestAlert,
+                path='alert', http_method='GET', name='getAlert')
+    def getAlert(self, request):
+        """Return latest alert."""
+        return self._doAlert()
 
 
     @endpoints.method(message_types.VoidMessage, ConferenceForms,
@@ -412,6 +459,7 @@ class ConferenceApi(remote.Service):
         return ConferenceForms(
             items=[self._copyConferenceToForm(conf, "") for conf in q]
         )
+
 
 # registers API
 api = endpoints.api_server([ConferenceApi])
